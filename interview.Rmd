@@ -1,0 +1,218 @@
+---
+title: "Renal Data Survival Analysis"
+author: "Chenhuan Li"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Dataset
+
+```{r}
+library(tidyverse)
+library(SurvRegCensCov)
+library(survival)  
+library(km.ci)
+library(tableone)
+
+
+```
+
+
+```{r}
+
+renal <- read.table("renal_data.txt", header = TRUE)
+
+# data type manage
+renal$medgroup <- factor(renal$medgroup, levels = c(0, 1), labels = c("Treatment A", "Treatment B"))
+renal$sex <- factor(renal$sex, levels = c(0, 1), labels = c("Female", "Male"))
+renal$heartfailure <- factor(renal$heartfailure, levels = c(0, 1), labels = c("No", "Yes"))
+renal$livercirrhosis <- factor(renal$livercirrhosis, levels = c(0, 1), labels = c("No", "Yes"))
+renal$eGFRstage <- factor(renal$eGFRstage) # eGFR 1-5 ，factor
+
+## descriptive statistics
+myVars <- c("age", "sex", "BMI", "heartfailure", "livercirrhosis", "eGFRstage", "status_DT")
+
+catVars <- c("sex", "heartfailure", "livercirrhosis", "eGFRstage", "status_DT")
+
+tab1 <- CreateTableOne(vars = myVars, 
+                       strata = "medgroup", 
+                       data = renal, 
+                       factorVars = catVars)
+
+print(tab1, showAllLevels = TRUE, nonnormal = c("BMI", "age"), test = FALSE)
+
+```
+
+
+## Kaplan-Meier Curve
+```{r}
+# 在不考虑患者其他身体条件差异的情况下，直观比较两组药物的效果。
+
+library(survival)  
+library(survminer)
+km_fit <- survfit(Surv(time_DT, status_DT) ~ medgroup, data = renal)
+
+KM_plot <- ggsurvplot(km_fit, 
+           data = renal,
+           pval = TRUE,            
+           conf.int = TRUE,   
+           risk.table = TRUE,       
+           title = "Kaplan-Meier Curve: Time to Dialysis by Medication Group",
+           xlab = "Time to Dialysis", 
+           ylab = "Dialysis-Free Probability", 
+           palette = c("#E7B800", "#2E9FDF"))  
+
+print(KM_plot)
+```
+
+From Kaplan-Meier plot, we can observe a highly *significant difference* between the two treatment groups, with a log-rank p-value of less than 0.0001.”
+KM 曲线:我们可以观察到两组治疗具有极其显著的差异，Log-rank 检验的 $p$ 值小于 0.0001
+
+Patients in Treatment A (the yellow line) show a significantly higher dialysis-free probability compared to Treatment B (the blue line). 
+Treatment A 组（黄色线）的无透析概率显著高于 Treatment B 组
+
+The risk table shows that we have a *sufficient sample size* in both groups at the start, though the number at risk drops over time due to events and censoring.
+风险表:我们在开始时两组都有充足的样本量，尽管随着事件发生和删失，风险人数随时间下降。
+
+## Cox’s Proportional Hazards Model
+```{r}
+# holding other covariates constant
+cox_model <- coxph(Surv(time_DT, status_DT) ~ medgroup + age + sex + BMI + 
+                   heartfailure + livercirrhosis + eGFRstage, 
+                 data = renal)
+
+summary(cox_model)
+```
+
+To further validate our findings and adjust for potential confounders.
+验证,校正潜在的混杂因素
+
+The results are highly *robust*. Even after *controlling for age, BMI, comorbidities, and eGFR stages*, patients on Treatment B have a *2.34 times higher hazard* of the event (dialysis) compared to Treatment A, with a p-value of less than 0.0001
+即使在控制了其他变量后，与治疗 A 相比，治疗 B 透析的风险增加了 2.34 倍
+
+
+## Variable selection
+```{r}
+# stepwise model selection base on AIC 
+optimal_model <- step(cox_model, direction = "both")
+
+# Optimal Model
+summary(optimal_model)
+```
+
+Optimal Model=Full Model
+AIC cares about the overall predictive performance, AIC balances the goodness-of-fit with a penalty for model complexity
+
+## Cox-Snell Residual Plot
+
+```{r}
+library(survival)
+
+# Martingale Residual 
+res_mart <- residuals(optimal_model, type = "martingale")
+
+# Cox-Snell Residual 
+cs_residuals <- renal$status_DT - res_mart
+
+fit_cs <- survfit(Surv(cs_residuals, renal$status_DT) ~ 1)
+
+# plot X:Cox-Snell Residuals，y:Cumulative Hazard)
+plot(fit_cs$time, -log(fit_cs$surv), type = "s", 
+     xlab = "Cox-Snell Residuals", 
+     ylab = "Cumulative Hazard", 
+     main = "Cox-Snell Residual Plot for Overall Fit",
+     lwd = 2)
+
+# 45-degree reference line
+abline(0, 1, col = "red", lty = 2, lwd = 2)
+```
+To confirm the overall goodness-of-fit, I derived the Cox-Snell residuals. As shown in this plot, the estimated cumulative hazard function *closely follows* the 45-degree reference line, especially in the main body of the data(early and middle). This indicates that the chosen model structure and baseline hazard fit the actual data well.
+
+
+## Hypothesis Testing
+```{r}
+# PH Assumption - Schoenfeld Residuals
+ph_optimal <- cox.zph(optimal_model)
+print(ph_optimal)
+
+# plot
+Schoenfeld_plot <- ggcoxzph(ph_optimal)
+print(Schoenfeld_plot)
+```
+
+the Hazard Ratio for each predictor remains constant *over time*. Mathematically, it tests the correlation between the Schoenfeld residuals and survival time.
+
+Model diagnostics.模型诊断 
+GLOBAL P=0.146, the Proportional Hazards assumption holds.模型整体可靠
+
+Schoenfeld residuals plot:the smoothed curves for our predictors remain fundamentally flat and centered around zero over time. This confirms that the Proportional Hazards assumption holds.
+残差图:预测变量的平滑曲线随时间推移基本保持水平并以零为中心，这证实了比例风险假设完美成立。
+
+sex            p=  1 0.016 
+
+eGFRstage       p=  4 0.044
+
+This means that the effects of sex and eGFR stage on dialysis are not *constant*.
+plot: smoothed curve only *deviates slightly* from zero at the extreme tails, might be acceptable
+
+if not acceptable, use Stratified Cox Model
+
+```{r}
+#Deviance Residuals)
+# 目的：检查数据里有没有“极品病人”（比如病情极其严重却活了极久，把整个模型带偏了）
+# 
+Deviance_plot <- ggcoxdiagnostics(optimal_model, 
+                                  type = "deviance",
+                                  linear.predictions = FALSE, 
+                                  ggtheme = theme_bw(),
+                                  title = "Deviance Residuals: Checking for Outliers")
+print(Deviance_plot)
+```
+ the data points are distributed around zero, largely bounded within the normal range, indicating an nice goodness-of-fit without severe influential outliers. 
+
+## Stratified Cox Model
+
+```{r}
+# 假设对 sex 和 eGFRstage 进行分层
+stratified_model <- coxph(Surv(time_DT, status_DT) ~ medgroup + age + BMI + 
+                          heartfailure + livercirrhosis + 
+                          strata(sex) + strata(eGFRstage), data = renal)
+summary(stratified_model)
+```
+The HR for medgroup Treatment B is now 2.37 (previously 2.34), shifted slightly, and the P-value remains *significant* at 4.47e-09. This conclusion *still reliable* after removing the influence of pH violation.
+
+## Accelerated Failure Time (AFT) model
+
+
+```{r}
+library(survival)
+#  WeibullAFT
+aft_model <- survreg(Surv(time_DT, status_DT) ~ medgroup + age + BMI + heartfailure + livercirrhosis + sex + eGFRstage, data = renal, dist = "weibull")
+summary(aft_model)
+```
+
+Treatment B has a highly *significant* negative coefficient (-0.55), meaning it significantly accelerates the time to dialysis. Being on Treatment B 'accelerates' the disease progression, shrinking the dialysis-free time by about $1-\exp(-0.55466) \approx 0.43$ = 43% compared to Treatment A.
+
+```{r}
+beta_aft <- coef(aft_model)
+scale_val <- aft_model$scale
+
+# dividing the negative AFT coefficients by the scale parameter(log Hazard Ratios)
+beta_ph <- -beta_aft / scale_val
+
+# convert the results to Hazard Ratios (HR)
+HR_converted <- exp(beta_ph)
+
+aft_to_hr_table <- data.frame(
+  AFT_Coefficient = beta_aft,
+  Converted_Cox_Coef = beta_ph,
+  Converted_HR = HR_converted
+)
+print(round(aft_to_hr_table[-1, ], 3))
+```
+
+The converted HR for Treatment B is 2.439, which confirms Cox findings (HR=2.34，2.37),

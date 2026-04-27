@@ -1,0 +1,389 @@
+---
+title: 'hw4'
+output: 
+  pdf_document:
+    latex_engine: xelatex
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## 7.2
+In Exercise 5 of Chapter 6, the survival experience of patients given an autologous transplant was compared to a postulated exponential survival rate with a hazard rate of 0.045. Using the data in Table 1.4 of Chapter 1, test the hypothesis that the hazard rate of these auto transplant patients is equal to 0.045 against the alternative that it is larger than 0.045 using the one-sample, log-rank test. Repeat this test using a weight function which gives heavier weight to departures early in time from this hazard rate.
+
+```{r}
+library(SurvRegCensCov)
+library(survival)  # loading survival functions into R
+library(KMsurv)    # datasets from Klein and Moeschberger textbook
+library(km.ci)
+data_directory <- "functions/"
+```
+
+```{r}
+data(alloauto )
+head(alloauto)
+
+timevar <- alloauto$time[alloauto$type == 2]
+delta   <- alloauto$delta[alloauto$type == 2]
+
+null_surv <- exp(-0.045 * timevar) #Expected survival probability
+
+# log-rank test (W = 1)
+logrt <- survdiff(Surv(timevar, delta) ~ offset(null_surv))
+
+z = sqrt(logrt$chisq)
+# p-value
+pnorm(z)
+```
+p-value > 0.05, we do not have sufficient evidence to reject the hypothesis, and the hazard rate of these auto transplant patients is equal to 0.045 with an $\alpha = 0.05$.
+
+```{r}
+# using weight function
+logrtw1 <- survdiff(Surv(timevar, delta) ~ offset(null_surv), rho = 1)
+logrtw2 <- survdiff(Surv(timevar, delta) ~ offset(null_surv), rho = 2)
+logrtw1
+logrtw2
+
+# p-value
+z1 = sqrt(logrtw1$chisq)
+pnorm(z1)
+
+# p-value
+z2 = sqrt(logrtw2$chisq)
+pnorm(z2)
+```
+
+p-value > 0.05, we do not have sufficient evidence to reject the hypothesis, and the hazard rate of these auto transplant patients is equal to 0.045 even with heavier weight to departures early in time from this hazard rate.
+
+## 7.4
+
+In section 1.11, data from a study of the effect of ploidy on survival for patients with tumors of the tongue was reported.
+(a) Test the hypothesis that the survival rates of patients with cancer of the tongue are the same for patients with aneuploid and diploid tumors using the log-rank test.
+(b) If primary interest is in detecting differences in survival rates between the two types of cancers which occur soon after the diagnosis of the cancer, repeat part a using a more appropriate test statistic.
+
+```{r}
+data(tongue)
+head(tongue)
+# Log-Rank Test (W = 1)
+survdiff(Surv(time, delta) ~ type, data = tongue, rho = 0)
+```
+With a p-value > 0.05, we do not have sufficient evidence to reject the hypothesis that the survival rates of patients with cancer of the tongue are the same for patients with aneuploid and diploid tumors with an $\alpha = 0.05$. 
+
+### b
+```{r}
+# b 
+#Log-Rank Test with Peto-Peto Weight
+survdiff(Surv(time, delta) ~ type, data = tongue, rho = 1)
+
+# Cox's Proportional Hazards Model
+fit <- coxph(Surv(time, delta) ~ type, data = tongue)
+summary(fit)
+```
+
+we still do not have sufficient evidence to reject the hypothesis that the survival rates of patients with cancer of the tongue are the same for patients with aneuploid and diploid tumors with an $\alpha = 0.05$.
+
+
+## 7.9
+
+On our web page, data is reported on the death times of 863 kidney transplant patients (see section 1.7). Here, patients can be classified by race and sex into one of four groups.
+(a) Test the hypothesis that there is no difference in survival between the four groups.
+
+```{r}
+data(kidtran)
+
+survdiff(Surv(time, delta) ~ race + gender, data = kidtran, rho = 0)
+
+```
+
+p-value > 0.05, we do not have sufficient evidence to reject the hypothesis, and there is no difference in survival between the four groups.
+
+## 8.1
+
+In section 1.10, times to death or relapse (in days) are given for 23 non-Hodgkin’s lymphoma (NHL) patients, 11 receiving an allogenic (Allo) transplant from an HLA-matched sibling donor and 12 patients receiving an autologous (Auto) transplant. Also, data on 20 Hodgkin’s lymphoma (HOD) patients, 5 receiving an allogenic (Allo) transplant from an HLAmatched sibling donor and 15 patients receiving an autologous (Auto) transplant is given.
+
+### a
+Treating NHL Allo as the baseline hazard function, state the appropriate coding which would allow the investigator to test for any difference in survival functions for the four groups, treating them as four independent groups.
+```{r}
+data(hodg, package = "KMsurv")
+?hodg
+# gtype:Graft type (1=allogenic, 2=autologous)
+# dtype: Disease type (1=Non Hodgkin lymphoma, 2=Hodgkins disease)
+head(hodg)
+hodg[23, ] <- c(2, 1, 176, 1, 80, 38)
+
+# baseline group
+hodg$base <- ifelse(hodg$gtype == 1 & hodg$dtype == 1, 1, 0)
+baseline <- subset(hodg, base == 1)
+
+## 3 other groups
+hodg$g1 <- ifelse(hodg$gtype == 1 & hodg$dtype == 2, 1, 0)
+group1 <- subset(hodg, g1 == 1)
+
+hodg$g2 <- ifelse(hodg$gtype == 2 & hodg$dtype == 1, 1, 0)
+group2 <- subset(hodg, g2 == 1)
+
+hodg$g3 <- ifelse(hodg$gtype == 2 & hodg$dtype == 2, 1, 0)
+group3 <- subset(hodg, g3 == 1)
+
+```
+
+### b
+Treating NHL Allo as the baseline hazard function, state the appropriate coding which would allow the investigator to test for an interaction between type of transplant and disease type using main effects and interaction terms.
+
+```{r}
+# new columns
+hodg$gtypen <- ifelse(hodg$gtype == 1, 0, 1)
+hodg$dtypen <- ifelse(hodg$dtype == 1, 0, 1)
+
+# interaction variable
+hodg$int <- hodg$dtypen * hodg$gtypen
+```
+
+### c
+Suppose that we have the following model for the hazard rates in the four groups: What are the risk coefficients, βi, i = 1, 2, 3, for the interaction model in part b?
+ 
+h(t | NHL Allo) = h0(t)
+h(t | HOD Allo) = h0(t)exp(2)
+h(t | NHL Auto) = h0(t)exp(1.5)
+h(t | HOD Auto) = h0(t)exp(0.5)
+
+**solution**
+$\beta_(draft)=2$, $\beta_(graft)=1.5$, $\beta_(graft)+\beta_(draft)+\beta_(interaction)=0.5$
+Thus, $\beta_(interaction)=0.5−2−1.5=−3$
+
+## 8.4
+
+In Exercise 7 of Chapter 7, three different treatments were administered to rats who had F98 glioma cells implanted into their brains. The data for the three groups of rats lists the death times (in days) in that exercise. Create two dummy variables, $Z_1=1$ if animal is in the “radiation only” group, 0 otherwise; $Z_2=1$ if animal is in the “radiation plus BPA” group, 0 otherwise. Use the Breslow method of handling ties in the problems below.
+
+```{r}
+data(bnct)
+?bnct
+# trt: Treatment (1=untreated, 2=radiated, 3=radiated + BPA)
+bnct$z1 <- ifelse(bnct$trt == 2, 1, 0)
+bnct$z2 <- ifelse(bnct$trt == 3, 1, 0)
+```
+
+### a
+Estimate $\beta_1$ and $\beta_2$ and their respective standard errors. Find a 95% confidence interval for the relative risk of death of an animal radiated only compared to an untreated animal.
+
+```{r}
+fitb <- coxph(Surv(time, death) ~ z1 + z2, data = bnct, ties = "breslow")
+summary(fitb)
+```
+the relative risk of death of an animal radiated only compared to an untreated animal 
+z1:   0.16333  
+CI: 0.054531    0.4892
+
+### b
+Test the global hypothesis of no effect of either radiation or radiation plus BPA on survival. Perform the test using all the three tests (Wald, likelihood ratio, and score test).
+
+```{r}
+fit <- coxph(Surv(time, death) ~ factor(trt), data = bnct, ties = "breslow")
+fit
+fitnull <- coxph(Surv(time, death) ~ 1, data = bnct, ties = "breslow")
+
+#Wald Test
+b.null <- c(0, 0)
+
+X2.wald <- t(fit$coefficients[1:2] - b.null) %*% 
+  solve(fit$var) %*% 
+  (fit$coefficients[1:2] - b.null) 
+
+round(cbind(X2.wald, 1-pchisq(X2.wald, 2)), 4)
+
+```
+
+p-value < 0.05, we can reject the null hypothesis.
+
+
+```{r}
+#Likelihood Ratio Test
+X2.lrt <- 2*(fit$loglik[2]-fit$loglik[1])
+round(cbind(X2.lrt, 1-pchisq(X2.lrt, 2)), 4)
+```
+p-value < 0.05, we can reject the null hypothesis.
+
+```{r}
+# Score test
+X2.sc <- fit$score
+round(cbind(X2.sc, 1 - pchisq(X2.sc, 4)), 4)
+```
+p-value < 0.05, we can reject the null hypothesis.
+
+### c
+Test the hypothesis that the effect a radiated only animal has on survival is the same as the effect of radiation plus BPA (i.e., Test H0 : $\beta_1=\beta_2$).
+
+```{r}
+# Generalized wald test
+C <- c(1, -1)
+b0 <- c(0, 0)
+b  <- fit$coefficients
+V  <- fit$var
+
+z <- t(C %*% b - C %*% b0) %*% solve(t(C) %*% V %*% C) %*% 
+  (C %*% b - C %*% b0)
+
+round(cbind(z, 1-pchisq(z, 2)), 4)
+```
+
+p-value = 0.0222 < 0.05, we can reject the null hypothesis.
+
+### d
+Find an estimate and a 95% confidence interval for the relative risk of death for a radiation plus BPA animal as compared to a radiated only animal.
+
+```{r}
+r <- fit$coefficients[2] - fit$coefficients[1]
+v <- V[1, 1] + V[2, 2] - 2* V[1, 2]
+# CI
+# 95% CI
+c(exp(r - 1.96 * sqrt(v)), exp(r + 1.96 * sqrt(v)))
+```
+
+
+### e
+Test the hypothesis that any radiation given as a treatment (either radiation alone or with BPA) has a different effect on survival than no radiation. Use the likelihood ratio test.
+
+```{r}
+bnct$z3 <- ifelse(bnct$z2 == 0 & bnct$z1 == 0, 0, 1);
+fitz3 <- coxph(Surv(time, death) ~ z3, data = bnct, ties = "breslow")
+summary(fitz3)
+```
+
+
+```{r}
+# test beta(z3) =? 0
+round(cbind(2*(fitz3$loglik[2]-fitz3$loglik[1]), 
+            1-pchisq(2*(fitz3$loglik[2]-fitz3$loglik[1]), 1)), 4)
+```
+With p-value = 0 < 0.05, we can reject the null hypothesis, radiation given as a treatment has a different effect on survival than no radiation. 
+
+### f
+Repeat part (e) using a Wald test.
+
+```{r}
+C <- c(1)
+b0 <- c(0)
+b  <- fitz3$coefficients
+V  <- fitz3$var
+z <- t(C %*% b - C %*% b0) %*% solve(t(C) %*% V %*% C) %*% 
+  (C %*% b - C %*% b0)
+round(cbind(z, 1-pchisq(z, 1)), 4)
+```
+With p-value = 0 < 0.05, we can reject the null hypothesis, radiation given as a treatment has a different effect on survival than no radiation. 
+
+## 8.5
+Using the data set in Exercise 1, using the Breslow method of handling ties,
+
+### a
+Analyze the data by performing a global test of no effect of group as defined in Exercise 8.1(a) on survival. Construct an ANOVA table to summarize estimates of the risk coefficients and the results of the one degree of freedom tests for each covariate in the model.
+
+```{r}
+head(hodg)
+fithodg <- coxph(Surv(time, delta) ~ factor(g1) + factor(g2) + factor(g3), data = hodg, ties = "breslow")
+summary(fithodg)
+```
+```{r}
+# Likelihood Ratio test
+round(cbind(2*(fithodg$loglik[2]-fithodg$loglik[1]), 
+            1-pchisq(2*(fithodg$loglik[2]-fithodg$loglik[1]), 3)), 4)
+```
+With p-value = 0.0482 < 0.05, we can reject the null hypothesis.
+```{r}
+anova(fithodg)
+```
+
+### b
+Repeat part (a) using the coding as described in Exercise 8.1(b). Furthermore, test the hypothesis of disease type by transplant interaction using a likelihood ratio rest based on this coding. Repeat using the Wald test.
+
+```{r}
+# new columns
+hodg$gtypen <- ifelse(hodg$gtype == 1, 0, 1)
+hodg$dtypen <- ifelse(hodg$dtype == 1, 0, 1)
+
+# interaction variable
+hodg$int <- hodg$dtypen * hodg$gtypen
+
+fitint <- coxph(Surv(time, delta) ~ gtypen + dtypen + int, data = hodg, ties = "breslow")
+
+fitnoi <- coxph(Surv(time, delta) ~ gtypen + dtypen, data = hodg, ties = "breslow")
+
+# Likelihood Ratio Test
+X2.lrt <- 2*(fitint$loglik[2]-fitnoi$loglik[2])
+round(cbind(X2.lrt, 1-pchisq(X2.lrt, 1)), 4)
+
+```
+```{r}
+# Wald test
+C <- c(0, 0, 1)
+b0 <- c(0, 0, 0)
+b  <- fitint$coefficients
+V  <- fitint$var
+
+z <- t(C %*% b - C %*% b0) %*% solve(t(C) %*% V %*% C) %*% 
+  (C %*% b - C %*% b0)
+round(cbind(z, 1-pchisq(z, 3)), 4)
+```
+
+### c
+Find point estimates and 95% confidence intervals for the relative risk of death for an NHL Auto transplant patient as compared to an NHL Allo transplant patient.
+
+```{r}
+summary(fithodg)
+```
+### d
+Find the p-value of a test of the hypothesis that the hazard rates are the same for HOD Allo transplants and NHL Allo patients, using the Wald test. Repeat a similar test for Auto patients.
+
+
+```{r}
+# Allo: b1 =? 0
+C <- c(1, 0, 0)
+b0 <- c(0, 0, 0)
+b  <- fithodg$coefficients
+V  <- fithodg$var
+
+z <- t(C %*% b - C %*% b0) %*% solve(t(C) %*% V %*% C) %*% 
+  (C %*% b - C %*% b0)
+round(cbind(z, 1-pchisq(z, 1)), 4)
+```
+With p-value < 0.05, we can reject the null hypothesis.
+
+```{r}
+# Auto b3 - b2 =? 0
+C <- c(0, -1, 1)
+b0 <- c(0, 0, 0)
+b  <- fithodg$coefficients
+V  <- fithodg$var
+
+z <- t(C %*% b - C %*% b0) %*% solve(t(C) %*% V %*% C) %*% 
+  (C %*% b - C %*% b0)
+round(cbind(z, 1-pchisq(z, 1)), 4)
+```
+With p-value > 0.05, we can not reject the null hypothesis.
+
+### e
+Test the hypothesis, using the Wald test, that the hazard rates for Auto transplant and Allo transplant patients are the same for each disease group against the alternative that the hazard rates for Auto transplant and Allo transplant patients for at least one group are different using a two-degree of freedom test of H0 : h(t|NHL Allo) = h(t|NHL Auto) and H0 : h(t|HOD Allo) = h(t|HOD Auto).
+
+```{r}
+C  <- rbind(c(0, 1, 0), 
+            c(-1, 0, 1))
+b0 <- c(0, 0, 0)
+
+
+wald <- t(C %*% b - C %*% b0) %*% solve(C %*% V %*% t(C)) %*% 
+  (C %*% b - C %*% b0)
+round(cbind(wald, 1-pchisq(wald, 2)), 4)
+
+```
+p-value < 0.05, we reject the null hypothesis.
+
+
+
+
+
+
+
+
+
